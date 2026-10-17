@@ -236,16 +236,20 @@ class MainActivity : Activity() {
 
         content.addView(sectionTitle("账单明细"))
         searchInput = EditText(this).apply {
-            hint = "搜索备注或分类"; singleLine = true
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            setBackgroundColor(white)
-            addTextChangedListener(object : android.text.TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { query = s?.toString()?.trim() ?: ""; renderList() }
-                override fun afterTextChanged(s: android.text.Editable?) {}
-            })
+    hint = "搜索备注或分类"
+    setSingleLine(true)
+    setPadding(dp(12), dp(8), dp(12), dp(8))
+    setBackgroundColor(white)
+    addTextChangedListener(object : android.text.TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+            query = s?.toString().orEmpty()
+            refresh()
         }
-        content.addView(searchInput)
+        override fun afterTextChanged(s: android.text.Editable?) {}
+    })
+}
+content.addView(searchInput)
         content.addView(space(8))
         val filters = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         monthSpinner = Spinner(this)
