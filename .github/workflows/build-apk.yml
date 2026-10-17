@@ -28,6 +28,7 @@ jobs:
           gradle-version: "8.9"
 
       - name: Build debug APK
+        working-directory: ./QuickLedgerAndroid
         run: gradle assembleDebug
 
       - name: Upload APK
