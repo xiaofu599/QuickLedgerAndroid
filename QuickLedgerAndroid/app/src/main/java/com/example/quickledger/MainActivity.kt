@@ -164,7 +164,7 @@ class MainActivity : Activity() {
         titleCol.addView(text("随手记账", 30, ink, true))
         titleCol.addView(text("每一笔日常，都值得好好记录", 13, muted))
         header.addView(titleCol, LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(text("✦", 28, purple, true))
+        header.addView(button("年度账单  ›", 0xFFE9F0E7.toInt(), purple) { showAnnualBill() })
         content.addView(header)
         content.addView(space(20))
 
@@ -296,6 +296,7 @@ class MainActivity : Activity() {
             card.addView(text(money(item.second), 20, item.third, true))
             val lp = LinearLayout.LayoutParams(0, -2, 1f)
             if (i > 0) lp.leftMargin = dp(10)
+            card.setOnClickListener { showRanking(if (i == 0) "收入" else "支出", monthNow()) }
             detailRow.addView(card, lp)
         }
         summaryBox.addView(detailRow)
@@ -353,6 +354,146 @@ class MainActivity : Activity() {
             listBox.addView(row)
             listBox.addView(space(7))
         }
+    }
+
+    // 年度账单：不改变原始账单或加密格式
+    private fun showAnnualBill(initialYear: Int = Calendar.getInstance().get(Calendar.YEAR)) {
+        var selectedYear = initialYear
+        val wrapper = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(12))
+            setBackgroundColor(bg)
+        }
+        val yearRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        val prev = button("‹", 0xFFE9F0E7.toInt(), purple) { }
+        val next = button("›", 0xFFE9F0E7.toInt(), purple) { }
+        val yearText = text("${selectedYear} 年", 21, ink, true).apply { gravity = Gravity.CENTER }
+        yearRow.addView(prev, LinearLayout.LayoutParams(dp(52), dp(48)))
+        yearRow.addView(yearText, LinearLayout.LayoutParams(0, dp(48), 1f))
+        yearRow.addView(next, LinearLayout.LayoutParams(dp(52), dp(48)))
+        wrapper.addView(yearRow)
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        wrapper.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        val dialog = AlertDialog.Builder(this).setView(wrapper).setNegativeButton("返回首页", null).create()
+        fun drawYear() {
+            yearText.text = "${selectedYear} 年"
+            body.removeAllViews()
+            val yearEntries = entries.filter { it.date.startsWith("$selectedYear-") }
+            val inc = yearEntries.filter { it.type == "收入" }.sumOf { it.amount }
+            val exp = yearEntries.filter { it.type == "支出" }.sumOf { it.amount }
+            val hero = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(20), dp(20), dp(20), dp(20))
+                background = rounded(0xFFFFDB5C.toInt(), 22)
+            }
+            hero.addView(text("年结余", 14, 0xFF65531D.toInt()))
+            hero.addView(space(8))
+            hero.addView(text(money(inc - exp), 29, 0xFF2D2A20.toInt(), true))
+            hero.addView(space(12))
+            hero.addView(text("年收入 ${money(inc)}    年支出 ${money(exp)}", 14, 0xFF51451F.toInt()))
+            body.addView(hero)
+            body.addView(space(14))
+            val headings = LinearLayout(this).apply { setPadding(dp(8), dp(12), dp(8), dp(12)) }
+            listOf("月份", "月收入", "月支出", "月结余").forEachIndexed { i, name ->
+                headings.addView(text(name, 12, muted), LinearLayout.LayoutParams(0, -2, if (i == 0) .65f else 1f))
+            }
+            body.addView(headings)
+            for (m in 12 downTo 1) {
+                val ym = String.format(Locale.US, "%04d-%02d", selectedYear, m)
+                val records = yearEntries.filter { month(it.date) == ym }
+                val income = records.filter { it.type == "收入" }.sumOf { it.amount }
+                val expense = records.filter { it.type == "支出" }.sumOf { it.amount }
+                val row = LinearLayout(this).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(8), dp(16), dp(8), dp(16))
+                    background = rounded(white, 12)
+                }
+                listOf("${m}月", String.format(Locale.CHINA, "%.2f", income / 100.0),
+                    String.format(Locale.CHINA, "%.2f", expense / 100.0),
+                    String.format(Locale.CHINA, "%.2f", (income - expense) / 100.0)).forEachIndexed { i, v ->
+                    row.addView(text(v, 12, if (i == 3 && income < expense) red else ink, i == 0),
+                        LinearLayout.LayoutParams(0, -2, if (i == 0) .65f else 1f))
+                }
+                row.setOnClickListener {
+                    dialog.dismiss()
+                    filterMonth = ym
+                    fillFilters()
+                    renderList()
+                    Toast.makeText(this, "已筛选 $ym 账单", Toast.LENGTH_SHORT).show()
+                }
+                body.addView(row)
+                body.addView(space(3))
+            }
+        }
+        // 直接在当前弹窗更新年份，避免叠加多个弹窗
+        prev.setOnClickListener { selectedYear--; drawYear() }
+        next.setOnClickListener { selectedYear++; drawYear() }
+        drawYear()
+        dialog.show()
+        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * .85f).toInt())
+    }
+
+    private fun showRanking(type: String, targetMonth: String) {
+        var sortByAmount = true
+        val wrapper = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+            setBackgroundColor(bg)
+        }
+        val title = text("${targetMonth.replace('-', '年')}月 · ${type}排行", 21, ink, true)
+        wrapper.addView(title)
+        wrapper.addView(space(10))
+        val total = entries.filter { it.type == type && month(it.date) == targetMonth }.sumOf { it.amount }
+        wrapper.addView(text("本月总$type", 13, muted))
+        wrapper.addView(text(money(total), 30, ink, true))
+        wrapper.addView(space(14))
+        val orderButton = button("按金额排序  ⇅", 0xFFE9F0E7.toInt(), purple) { }
+        wrapper.addView(orderButton)
+        wrapper.addView(space(10))
+        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        wrapper.addView(ScrollView(this).apply { addView(rows) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        val dialog = AlertDialog.Builder(this).setView(wrapper).setNegativeButton("返回", null).create()
+        fun drawRows() {
+            rows.removeAllViews()
+            val filtered = entries.filter { it.type == type && month(it.date) == targetMonth }
+            val ranked = if (sortByAmount) filtered.sortedWith(compareByDescending<Entry> { it.amount }.thenByDescending { it.date })
+                else filtered.sortedWith(compareByDescending<Entry> { it.date }.thenByDescending { it.id })
+            if (ranked.isEmpty()) {
+                rows.addView(text("这个月还没有${type}记录", 14, muted).apply { setPadding(0, dp(24), 0, dp(24)) })
+            }
+            ranked.forEach { e ->
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), dp(13), dp(12), dp(13))
+                    background = rounded(white, 14)
+                }
+                val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+                top.addView(text(if (e.note.isBlank()) e.category else e.note, 15, ink, true), LinearLayout.LayoutParams(0, -2, 1f))
+                top.addView(text(money(e.amount), 15, if (type == "收入") green else red, true))
+                row.addView(top)
+                row.addView(space(7))
+                val percentage = if (total == 0L) 0.0 else e.amount.toDouble() / total * 100
+                row.addView(text("${e.date}  ·  ${e.category}  ·  ${String.format(Locale.US, "%.1f", percentage)}%", 12, muted))
+                row.addView(space(6))
+                val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                    max = 1000
+                    progress = (percentage * 10).toInt().coerceIn(0, 1000)
+                    progressTintList = android.content.res.ColorStateList.valueOf(if (type == "收入") 0xFFF1CE47.toInt() else green)
+                }
+                row.addView(progress, LinearLayout.LayoutParams(-1, dp(5)))
+                row.setOnClickListener { dialog.dismiss(); showEntryDialog(e) }
+                rows.addView(row)
+                rows.addView(space(7))
+            }
+        }
+        orderButton.setOnClickListener {
+            sortByAmount = !sortByAmount
+            orderButton.text = if (sortByAmount) "按金额排序  ⇅" else "按时间排序  ⇅"
+            drawRows()
+        }
+        drawRows()
+        dialog.show()
+        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * .83f).toInt())
     }
 
     private fun showEntryDialog(existing: Entry? = null) {
