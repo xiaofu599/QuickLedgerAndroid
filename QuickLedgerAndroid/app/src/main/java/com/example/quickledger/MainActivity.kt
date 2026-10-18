@@ -40,6 +40,8 @@ class MainActivity : Activity() {
     private var filterType = "全部"
     private var filterMonth = monthNow()
     private var query = ""
+    private var selectedDate: String? = null
+    private lateinit var dailyFilterInfo: TextView
     private lateinit var root: LinearLayout
     private lateinit var summaryBox: LinearLayout
     private lateinit var chart: SpendChart
@@ -47,12 +49,12 @@ class MainActivity : Activity() {
     private lateinit var searchInput: EditText
     private lateinit var monthSpinner: Spinner
     private lateinit var typeSpinner: Spinner
-    private val purple = 0xFF507D65.toInt()
-    private val green = 0xFF427C61.toInt()
-    private val red = 0xFFC77A65.toInt()
-    private val ink = 0xFF303B33.toInt()
-    private val muted = 0xFF8B9188.toInt()
-    private val bg = 0xFFF8F6F0.toInt()
+    private val purple = 0xFFB8793E.toInt()
+    private val green = 0xFF43866A.toInt()
+    private val red = 0xFFD36C61.toInt()
+    private val ink = 0xFF332F29.toInt()
+    private val muted = 0xFF8B8277.toInt()
+    private val bg = 0xFFFFF9F0.toInt()
     private val white = 0xFFFFFEFA.toInt()
     private val cats = mapOf(
         "支出" to listOf("餐饮","交通","购物","日用","住房","娱乐","医疗","学习","其他"),
@@ -62,7 +64,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = bg
-        window.navigationBarColor = bg
+        window.navigationBarColor = white
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
         loadEntries()
         budgetCents = prefs.getLong("budget_cents", 0L)
@@ -145,42 +147,43 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this)
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(24), dp(20), dp(32))
+            setPadding(dp(16), dp(18), dp(16), dp(28))
         }
         scroll.addView(content)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        val bottom = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(8), dp(20), dp(14))
-            setBackgroundColor(bg)
-        }
-        bottom.addView(button("＋ 记一笔", purple) { showEntryDialog() },
-            LinearLayout.LayoutParams(-1, dp(54)))
-        root.addView(bottom)
+        root.addView(scroll, ViewGroup.LayoutParams(-1, -1))
         setContentView(root)
 
         val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; orientation = LinearLayout.HORIZONTAL }
         val titleCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        titleCol.addView(text("随手记账", 30, ink, true))
-        titleCol.addView(text("每一笔日常，都值得好好记录", 13, muted))
+        titleCol.addView(text("随手记账", 26, ink, true))
+        titleCol.addView(text("把日子过清楚，把每笔钱记明白", 13, muted))
         header.addView(titleCol, LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(button("年度账单  ›", 0xFFE9F0E7.toInt(), purple) { showAnnualBill() })
+        header.addView(button("＋ 记一笔", purple) { showEntryDialog() })
         content.addView(header)
-        content.addView(space(20))
+        content.addView(space(14))
 
-        summaryBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        summaryBox = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         content.addView(summaryBox)
         content.addView(space(12))
-        content.addView(sectionTitle("本月支出趋势"))
+        content.addView(sectionTitle("每日收入 / 支出趋势"))
         chart = SpendChart(this)
-        val chartCard = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(10), dp(8), dp(4)); background = rounded(white, 22) }
-        chartCard.addView(chart, LinearLayout.LayoutParams(-1, dp(150)))
-        content.addView(chartCard)
+        content.addView(chart, LinearLayout.LayoutParams(-1, dp(150)))
         content.addView(space(12))
+
+        val dailyHeader = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        dailyHeader.addView(sectionTitle("每日收支"), LinearLayout.LayoutParams(0, -2, 1f))
+        dailyHeader.addView(button("查看本月明细", 0xFFF4E6D4.toInt(), purple) { showDailyBreakdown() })
+        content.addView(dailyHeader)
+        dailyFilterInfo = text("点开每日明细，可查看当天所有账单", 12, muted)
+        dailyFilterInfo.setPadding(0, 0, 0, dp(8))
+        content.addView(dailyFilterInfo)
+        content.addView(space(4))
 
         val budgetRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         budgetRow.addView(text("月度预算", 17, ink, true), LinearLayout.LayoutParams(0, -2, 1f))
-        budgetRow.addView(button("设置预算", 0xFFE9F0E7.toInt(), purple) { showBudgetDialog() })
+        budgetRow.addView(button("年度账单", 0xFFF4E6D4.toInt(), purple) { showAnnualReport() })
+        budgetRow.addView(spaceH(6))
+        budgetRow.addView(button("设置预算", 0xFFF4E6D4.toInt(), purple) { showBudgetDialog() })
         content.addView(budgetRow)
         content.addView(space(6))
         val budgetInfo = text("", 14, muted)
@@ -190,10 +193,9 @@ class MainActivity : Activity() {
 
         content.addView(sectionTitle("账单明细"))
         searchInput = EditText(this).apply {
-            hint = "搜索备注或分类"; setSingleLine(true)
-            textSize = 15f
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = rounded(white, 14)
+            hint = "搜索备注或分类"; singleLine = true
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setBackgroundColor(white)
             addTextChangedListener(object : android.text.TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { query = s?.toString()?.trim() ?: ""; renderList() }
@@ -213,13 +215,13 @@ class MainActivity : Activity() {
         content.addView(listBox)
         content.addView(space(14))
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        actions.addView(button("导出备份", 0xFFE9F0E7.toInt(), purple) { exportBackup() }, LinearLayout.LayoutParams(0, -2, 1f))
+        actions.addView(button("导出备份", 0xFFEAE8FF.toInt(), purple) { exportBackup() }, LinearLayout.LayoutParams(0, -2, 1f))
         actions.addView(spaceH(8))
-        actions.addView(button("恢复备份", 0xFFE9F0E7.toInt(), purple) { importBackup() }, LinearLayout.LayoutParams(0, -2, 1f))
+        actions.addView(button("恢复备份", 0xFFEAE8FF.toInt(), purple) { importBackup() }, LinearLayout.LayoutParams(0, -2, 1f))
         content.addView(actions)
         content.addView(space(8))
         val privacy = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        privacy.addView(button("清空账单", 0xFFF8EBE5.toInt(), red) { clearEntries() }, LinearLayout.LayoutParams(0, -2, 1f))
+        privacy.addView(button("清空账单", 0xFFFFECEE.toInt(), red) { clearEntries() }, LinearLayout.LayoutParams(0, -2, 1f))
         content.addView(privacy)
         content.addView(space(10))
         content.addView(text("数据默认加密保存在本机。导出的备份文件包含可读账单，请妥善保管。", 12, muted))
@@ -227,23 +229,16 @@ class MainActivity : Activity() {
         renderAll()
     }
 
-    private fun rounded(color: Int, radiusDp: Int): android.graphics.drawable.GradientDrawable =
-        android.graphics.drawable.GradientDrawable().apply {
-            setColor(color)
-            cornerRadius = dp(radiusDp).toFloat()
-        }
-
     private fun text(s: String, size: Int, color: Int, bold: Boolean = false): TextView =
         TextView(this).apply { text = s; textSize = size.toFloat(); setTextColor(color); if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD) }
     private fun space(height: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
     private fun spaceH(width: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(width), 1) }
-    private fun sectionTitle(s: String) = text(s, 18, ink, true).apply { setPadding(dp(2), dp(6), 0, dp(12)) }
+    private fun sectionTitle(s: String) = text(s, 18, ink, true).apply { setPadding(0, dp(4), 0, dp(10)) }
     private fun button(label: String, color: Int, textColor: Int = white, action: () -> Unit): Button =
         Button(this).apply {
             text = label; setTextColor(textColor); textSize = 13f; isAllCaps = false
-            background = rounded(color, 18)
-            minimumHeight = dp(44)
-            setPadding(dp(12), dp(6), dp(12), dp(6)); setOnClickListener { action() }
+            setBackgroundTintList(android.content.res.ColorStateList.valueOf(color))
+            setPadding(dp(10), dp(4), dp(10), dp(4)); setOnClickListener { action() }
         }
 
     private fun fillFilters() {
@@ -272,37 +267,27 @@ class MainActivity : Activity() {
         val exp = thisMonth.filter { it.type == "支出" }.sumOf { it.amount }
         val inc = thisMonth.filter { it.type == "收入" }.sumOf { it.amount }
         val balance = inc - exp
-        val hero = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(22), dp(22), dp(22))
-            background = rounded(purple, 26)
-        }
-        hero.addView(text("本月结余  ·  ${monthNow()}", 13, 0xFFE2EEE4.toInt()))
-        hero.addView(space(12))
-        hero.addView(text(money(balance), 34, white, true))
-        hero.addView(space(10))
-        hero.addView(text("认真生活，轻松掌握每一笔收支", 12, 0xFFE2EEE4.toInt()))
-        summaryBox.addView(hero, LinearLayout.LayoutParams(-1, -2))
-        summaryBox.addView(space(12))
-        val detailRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        listOf(Triple("↗  本月收入", inc, green), Triple("↘  本月支出", exp, red)).forEachIndexed { i, item ->
+        listOf(Triple("本月支出", exp, red), Triple("本月收入", inc, green), Triple("本月结余", balance, if (balance < 0) red else purple)).forEachIndexed { i, item ->
             val card = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(16), dp(17), dp(12), dp(17))
-                background = rounded(white, 22)
+                orientation = LinearLayout.VERTICAL; setPadding(dp(10), dp(12), dp(7), dp(12)); setBackgroundColor(if (i == 0) 0xFFFFF0E9.toInt() else if (i == 1) 0xFFECF5EE.toInt() else 0xFFF7F0E4.toInt())
             }
-            card.addView(text(item.first, 13, muted))
-            card.addView(space(10))
-            card.addView(text(money(item.second), 20, item.third, true))
+            card.addView(text(item.first, 12, muted))
+            card.addView(space(7))
+            card.addView(text(money(item.second), 17, item.third, true))
             val lp = LinearLayout.LayoutParams(0, -2, 1f)
-            if (i > 0) lp.leftMargin = dp(10)
-            card.setOnClickListener { showRanking(if (i == 0) "收入" else "支出", monthNow()) }
-            detailRow.addView(card, lp)
+            if (i > 0) lp.leftMargin = dp(7)
+            if (item.first == "本月支出" || item.first == "本月收入") {
+                card.isClickable = true
+                card.setOnClickListener { showCategoryRanking(if (item.first == "本月支出") "支出" else "收入") }
+            }
+            summaryBox.addView(card, lp)
         }
-        summaryBox.addView(detailRow)
         chart.setValues((1..Calendar.getInstance().get(Calendar.DAY_OF_MONTH)).map { day ->
             val date = monthNow() + "-" + String.format(Locale.US, "%02d", day)
-            entries.filter { it.type == "支出" && it.date == date }.sumOf { it.amount }.toFloat() / 100f
+            val daily = entries.filter { it.date == date }
+            val income = daily.filter { it.type == "收入" }.sumOf { it.amount }.toFloat() / 100f
+            val expense = daily.filter { it.type == "支出" }.sumOf { it.amount }.toFloat() / 100f
+            income to expense
         })
         val spent = exp
         val info = root.findViewWithTag<TextView>("budgetInfo")
@@ -326,21 +311,29 @@ class MainActivity : Activity() {
     private fun renderList() {
         if (!::listBox.isInitialized) return
         listBox.removeAllViews()
+        if (::dailyFilterInfo.isInitialized) {
+            dailyFilterInfo.text = selectedDate?.let { "正在查看 $it 的账单 · 点此清除日期筛选" } ?: "点开每日明细，可查看当天所有账单"
+            dailyFilterInfo.setTextColor(if (selectedDate != null) purple else muted)
+            dailyFilterInfo.setOnClickListener {
+                selectedDate = null
+                renderList()
+            }
+        }
         val shown = entries.filter { e ->
             (filterMonth == "全部月份" || month(e.date) == filterMonth) &&
             (filterType == "全部" || e.type == filterType) &&
+            (selectedDate == null || e.date == selectedDate) &&
             (query.isBlank() || e.note.contains(query, true) || e.category.contains(query, true))
         }.sortedWith(compareByDescending<Entry> { it.date }.thenByDescending { it.id })
         if (shown.isEmpty()) {
-            val empty = text("🧾  暂无账单记录\n记下第一笔，让收支一目了然", 14, muted).apply { gravity = Gravity.CENTER; setPadding(0, dp(36), 0, dp(36)); background = rounded(white, 22) }
+            val empty = text("🧾  暂无账单记录", 14, muted).apply { gravity = Gravity.CENTER; setPadding(0, dp(28), 0, dp(28)) }
             listBox.addView(empty); return
         }
         shown.forEach { e ->
-            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(13), dp(14), dp(13)); background = rounded(white, 20) }
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), dp(10), dp(4), dp(10)) }
             val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            left.addView(text("${if (e.type == "支出") "◉" else "✦"}  ${if (e.note.isNotBlank()) e.note else e.category}", 15, ink, true))
-            left.addView(space(4))
-            left.addView(text(e.category + "  ·  " + e.date, 12, muted))
+            left.addView(text("${categoryIcon(e.category)}  ${e.category}${if (e.note.isNotBlank()) " · ${e.note}" else ""}", 15, ink, true))
+            left.addView(text(e.date, 12, muted))
             row.addView(left, LinearLayout.LayoutParams(0, -2, 1f))
             row.addView(text((if (e.type == "支出") "−" else "+") + money(e.amount), 15, if (e.type == "支出") red else green, true))
             row.isClickable = true
@@ -352,169 +345,119 @@ class MainActivity : Activity() {
                     }.show(); true
             }
             listBox.addView(row)
-            listBox.addView(space(7))
+            val divider = View(this).apply { setBackgroundColor(0xFFE9EBF2.toInt()) }
+            listBox.addView(divider, LinearLayout.LayoutParams(-1, dp(1)))
         }
     }
 
-    // 年度账单：不改变原始账单或加密格式
-    private fun showAnnualBill(initialYear: Int = Calendar.getInstance().get(Calendar.YEAR)) {
-        var selectedYear = initialYear
-        val wrapper = LinearLayout(this).apply {
+    private fun categoryIcon(category: String): String = when (category) {
+        "餐饮" -> "🍜"; "交通" -> "🚌"; "购物" -> "🛍️"; "日用" -> "🧻"
+        "住房" -> "🏠"; "娱乐" -> "🎮"; "医疗" -> "💊"; "学习" -> "📚"
+        "工资" -> "💼"; "奖金" -> "🎁"; "兼职" -> "🧑‍💻"; "理财" -> "📈"
+        "红包" -> "🧧"; else -> "💰"
+    }
+
+    private fun showDailyBreakdown() {
+        val monthKey = monthNow()
+        val cal = Calendar.getInstance()
+        val days = cal.get(Calendar.DAY_OF_MONTH)
+        val scroll = ScrollView(this)
+        val rows = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(8), dp(18), dp(12))
-            setBackgroundColor(bg)
+            setPadding(dp(16), dp(8), dp(16), dp(8))
         }
-        val yearRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        val prev = button("‹", 0xFFE9F0E7.toInt(), purple) { }
-        val next = button("›", 0xFFE9F0E7.toInt(), purple) { }
-        val yearText = text("${selectedYear} 年", 21, ink, true).apply { gravity = Gravity.CENTER }
-        yearRow.addView(prev, LinearLayout.LayoutParams(dp(52), dp(48)))
-        yearRow.addView(yearText, LinearLayout.LayoutParams(0, dp(48), 1f))
-        yearRow.addView(next, LinearLayout.LayoutParams(dp(52), dp(48)))
-        wrapper.addView(yearRow)
-        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        wrapper.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        val dialog = AlertDialog.Builder(this).setView(wrapper).setNegativeButton("返回首页", null).create()
-        fun drawYear() {
-            yearText.text = "${selectedYear} 年"
-            body.removeAllViews()
-            val yearEntries = entries.filter { it.date.startsWith("$selectedYear-") }
-            val inc = yearEntries.filter { it.type == "收入" }.sumOf { it.amount }
-            val exp = yearEntries.filter { it.type == "支出" }.sumOf { it.amount }
-            val hero = LinearLayout(this).apply {
+        val monthEntries = entries.filter { month(it.date) == monthKey }
+        val monthIncome = monthEntries.filter { it.type == "收入" }.sumOf { it.amount }
+        val monthExpense = monthEntries.filter { it.type == "支出" }.sumOf { it.amount }
+        rows.addView(text("本月收入 ${money(monthIncome)}    支出 ${money(monthExpense)}", 14, ink, true))
+        rows.addView(space(8))
+        for (day in days downTo 1) {
+            val date = "$monthKey-${String.format(Locale.US, "%02d", day)}"
+            val daily = monthEntries.filter { it.date == date }
+            val income = daily.filter { it.type == "收入" }.sumOf { it.amount }
+            val expense = daily.filter { it.type == "支出" }.sumOf { it.amount }
+            val net = income - expense
+            val row = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(20), dp(20), dp(20), dp(20))
-                background = rounded(0xFFFFDB5C.toInt(), 22)
+                setPadding(dp(8), dp(10), dp(8), dp(10))
+                setBackgroundColor(if (date == selectedDate) 0xFFFFF0D9.toInt() else white)
+                isClickable = true
             }
-            hero.addView(text("年结余", 14, 0xFF65531D.toInt()))
-            hero.addView(space(8))
-            hero.addView(text(money(inc - exp), 29, 0xFF2D2A20.toInt(), true))
-            hero.addView(space(12))
-            hero.addView(text("年收入 ${money(inc)}    年支出 ${money(exp)}", 14, 0xFF51451F.toInt()))
-            body.addView(hero)
-            body.addView(space(14))
-            val headings = LinearLayout(this).apply { setPadding(dp(8), dp(12), dp(8), dp(12)) }
-            listOf("月份", "月收入", "月支出", "月结余").forEachIndexed { i, name ->
-                headings.addView(text(name, 12, muted), LinearLayout.LayoutParams(0, -2, if (i == 0) .65f else 1f))
+            row.addView(text("$date${if (date == today()) "  今天" else ""}", 14, ink, true))
+            row.addView(space(3))
+            row.addView(text("收入 ${money(income)}    支出 ${money(expense)}    结余 ${money(net)}", 12, muted))
+            row.setOnClickListener {
+                selectedDate = date
+                filterMonth = monthKey
+                val monthOptions = (entries.map { month(it.date) } + monthNow()).distinct().sortedDescending().let { listOf("全部月份") + it }
+                monthSpinner.setSelection(monthOptions.indexOf(monthKey).takeIf { it >= 0 } ?: 0)
+                typeSpinner.setSelection(0)
+                renderList()
+                Toast.makeText(this, "已筛选 $date 的账单", Toast.LENGTH_SHORT).show()
+                (rows.parent as? View)?.let { }
             }
-            body.addView(headings)
-            for (m in 12 downTo 1) {
-                val ym = String.format(Locale.US, "%04d-%02d", selectedYear, m)
-                val records = yearEntries.filter { month(it.date) == ym }
-                val income = records.filter { it.type == "收入" }.sumOf { it.amount }
-                val expense = records.filter { it.type == "支出" }.sumOf { it.amount }
-                val row = LinearLayout(this).apply {
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(8), dp(16), dp(8), dp(16))
-                    background = rounded(white, 12)
-                }
-                listOf("${m}月", String.format(Locale.CHINA, "%.2f", income / 100.0),
-                    String.format(Locale.CHINA, "%.2f", expense / 100.0),
-                    String.format(Locale.CHINA, "%.2f", (income - expense) / 100.0)).forEachIndexed { i, v ->
-                    row.addView(text(v, 12, if (i == 3 && income < expense) red else ink, i == 0),
-                        LinearLayout.LayoutParams(0, -2, if (i == 0) .65f else 1f))
-                }
-                row.setOnClickListener {
-                    dialog.dismiss()
-                    filterMonth = ym
-                    fillFilters()
-                    renderList()
-                    Toast.makeText(this, "已筛选 $ym 账单", Toast.LENGTH_SHORT).show()
-                }
-                body.addView(row)
-                body.addView(space(3))
-            }
+            rows.addView(row)
+            val line = View(this).apply { setBackgroundColor(0xFFEDE3D6.toInt()) }
+            rows.addView(line, LinearLayout.LayoutParams(-1, dp(1)))
         }
-        // 直接在当前弹窗更新年份，避免叠加多个弹窗
-        prev.setOnClickListener { selectedYear--; drawYear() }
-        next.setOnClickListener { selectedYear++; drawYear() }
-        drawYear()
-        dialog.show()
-        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * .85f).toInt())
+        scroll.addView(rows)
+        AlertDialog.Builder(this).setTitle("${monthKey.replace("-", "年")}月每日收支")
+            .setView(scroll).setPositiveButton("完成", null).show()
     }
 
-    private fun showRanking(type: String, targetMonth: String) {
-        var sortByAmount = true
-        val wrapper = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(12), dp(18), dp(12))
-            setBackgroundColor(bg)
+    private fun showCategoryRanking(type: String) {
+        val grouped = entries.filter { month(it.date) == monthNow() && it.type == type }
+            .groupBy { it.category }
+            .mapValues { (_, list) -> list.sumOf { it.amount } }
+            .toList().sortedByDescending { it.second }
+        val total = grouped.sumOf { it.second }
+        val message = if (grouped.isEmpty()) "本月暂无$type记录" else grouped.joinToString("\n") { (cat, amount) ->
+            val pct = if (total == 0L) 0 else (amount * 100 / total).toInt()
+            "${categoryIcon(cat)} $cat    ${money(amount)}（$pct%）"
         }
-        val title = text("${targetMonth.replace('-', '年')}月 · ${type}排行", 21, ink, true)
-        wrapper.addView(title)
-        wrapper.addView(space(10))
-        val total = entries.filter { it.type == type && month(it.date) == targetMonth }.sumOf { it.amount }
-        wrapper.addView(text("本月总$type", 13, muted))
-        wrapper.addView(text(money(total), 30, ink, true))
-        wrapper.addView(space(14))
-        val orderButton = button("按金额排序  ⇅", 0xFFE9F0E7.toInt(), purple) { }
-        wrapper.addView(orderButton)
-        wrapper.addView(space(10))
-        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        wrapper.addView(ScrollView(this).apply { addView(rows) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        val dialog = AlertDialog.Builder(this).setView(wrapper).setNegativeButton("返回", null).create()
-        fun drawRows() {
-            rows.removeAllViews()
-            val filtered = entries.filter { it.type == type && month(it.date) == targetMonth }
-            val ranked = if (sortByAmount) filtered.sortedWith(compareByDescending<Entry> { it.amount }.thenByDescending { it.date })
-                else filtered.sortedWith(compareByDescending<Entry> { it.date }.thenByDescending { it.id })
-            if (ranked.isEmpty()) {
-                rows.addView(text("这个月还没有${type}记录", 14, muted).apply { setPadding(0, dp(24), 0, dp(24)) })
-            }
-            ranked.forEach { e ->
-                val row = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(dp(12), dp(13), dp(12), dp(13))
-                    background = rounded(white, 14)
-                }
-                val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-                top.addView(text(if (e.note.isBlank()) e.category else e.note, 15, ink, true), LinearLayout.LayoutParams(0, -2, 1f))
-                top.addView(text(money(e.amount), 15, if (type == "收入") green else red, true))
-                row.addView(top)
-                row.addView(space(7))
-                val percentage = if (total == 0L) 0.0 else e.amount.toDouble() / total * 100
-                row.addView(text("${e.date}  ·  ${e.category}  ·  ${String.format(Locale.US, "%.1f", percentage)}%", 12, muted))
-                row.addView(space(6))
-                val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-                    max = 1000
-                    progress = (percentage * 10).toInt().coerceIn(0, 1000)
-                    progressTintList = android.content.res.ColorStateList.valueOf(if (type == "收入") 0xFFF1CE47.toInt() else green)
-                }
-                row.addView(progress, LinearLayout.LayoutParams(-1, dp(5)))
-                row.setOnClickListener { dialog.dismiss(); showEntryDialog(e) }
-                rows.addView(row)
-                rows.addView(space(7))
-            }
+        AlertDialog.Builder(this).setTitle("本月$type分类排行").setMessage(message).setPositiveButton("知道了", null).show()
+    }
+
+    private fun showAnnualReport() {
+        val year = SimpleDateFormat("yyyy", Locale.US).format(Date())
+        val yearEntries = entries.filter { it.date.startsWith("$year-") }
+        val income = yearEntries.filter { it.type == "收入" }.sumOf { it.amount }
+        val expense = yearEntries.filter { it.type == "支出" }.sumOf { it.amount }
+        val lines = mutableListOf("年度总收入：${money(income)}", "年度总支出：${money(expense)}", "年度结余：${money(income - expense)}", "")
+        for (m in 1..12) {
+            val key = "$year-${String.format(Locale.US, "%02d", m)}"
+            val list = yearEntries.filter { month(it.date) == key }
+            if (list.isEmpty()) continue
+            lines.add("${m}月  收入 ${money(list.filter { it.type == "收入" }.sumOf { it.amount })}  ·  支出 ${money(list.filter { it.type == "支出" }.sumOf { it.amount })}")
         }
-        orderButton.setOnClickListener {
-            sortByAmount = !sortByAmount
-            orderButton.text = if (sortByAmount) "按金额排序  ⇅" else "按时间排序  ⇅"
-            drawRows()
-        }
-        drawRows()
-        dialog.show()
-        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * .83f).toInt())
+        AlertDialog.Builder(this).setTitle("$year 年度账单").setMessage(lines.joinToString("\n")).setPositiveButton("完成", null).show()
     }
 
     private fun showEntryDialog(existing: Entry? = null) {
         var type = existing?.type ?: "支出"
-        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(12), dp(20), dp(4)) }
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
         val typeSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("支出", "收入"))
             setSelection(if (type == "收入") 1 else 0)
         }
         val amount = EditText(this).apply {
-            hint = "金额（元）"; textSize = 18f; inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            hint = "金额（元）"; inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             existing?.let { setText(String.format(Locale.US, "%.2f", it.amount / 100.0)) }
         }
         val category = Spinner(this)
         fun updateCats() { category.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, cats[type]!!) }
         typeSpinner.onItemSelectedListener = simpleListener { pos -> type = if (pos == 0) "支出" else "收入"; updateCats() }
         val date = EditText(this).apply { setText(existing?.date ?: today()); hint = "日期 YYYY-MM-DD"; isSingleLine = true }
-        val note = EditText(this).apply {
-            hint = "备注（选填）"; isSingleLine = true
+        val previousNotes = entries.sortedByDescending { it.id }
+            .map { it.note.trim() }.filter { it.isNotBlank() }.distinct().take(30)
+        val note = AutoCompleteTextView(this).apply {
+            hint = "备注（选填，点此可选历史备注）"; isSingleLine = true
+            threshold = 0
             filters = arrayOf(android.text.InputFilter.LengthFilter(100))
             setText(existing?.note.orEmpty())
+            setAdapter(ArrayAdapter(this@MainActivity, android.R.layout.simple_dropdown_item_1line, previousNotes))
+            setOnClickListener { if (previousNotes.isNotEmpty()) showDropDown() }
+            setOnFocusChangeListener { _, hasFocus -> if (hasFocus && previousNotes.isNotEmpty()) showDropDown() }
         }
         layout.addView(labelled("类型", typeSpinner)); layout.addView(labelled("金额", amount))
         layout.addView(labelled("分类", category)); layout.addView(labelled("日期", date)); layout.addView(labelled("备注", note))
@@ -634,29 +577,49 @@ class MainActivity : Activity() {
 
 class SpendChart(context: android.content.Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private var values: List<Float> = emptyList()
+    private var values: List<Pair<Float, Float>> = emptyList()
     private val density = resources.displayMetrics.density
-    fun setValues(v: List<Float>) { values = v; invalidate() }
+    fun setValues(v: List<Pair<Float, Float>>) { values = v; invalidate() }
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val left = 12f*density; val right = width - 8f*density
-        val top = 12f*density; val bottom = height - 24f*density
-        paint.color = 0xFFE8EAE2.toInt(); paint.strokeWidth = density
+        val left = 12f * density
+        val right = width - 8f * density
+        val top = 24f * density
+        val bottom = height - 24f * density
+        paint.color = 0xFFEDE3D6.toInt()
+        paint.strokeWidth = density
         for (i in 0..3) {
-            val y = top + (bottom-top)*i/3f
+            val y = top + (bottom - top) * i / 3f
             canvas.drawLine(left, y, right, y, paint)
         }
+        // Compact legend: green = income, warm red = expense.
+        paint.textSize = 10f * density
+        paint.color = 0xFF43866A.toInt()
+        canvas.drawRoundRect(RectF(left, 4f*density, left+8f*density, 12f*density), 2f*density, 2f*density, paint)
+        paint.color = 0xFF8B8277.toInt()
+        canvas.drawText("收入", left+12f*density, 12f*density, paint)
+        val legendX = left + 52f*density
+        paint.color = 0xFFD36C61.toInt()
+        canvas.drawRoundRect(RectF(legendX, 4f*density, legendX+8f*density, 12f*density), 2f*density, 2f*density, paint)
+        paint.color = 0xFF8B8277.toInt()
+        canvas.drawText("支出", legendX+12f*density, 12f*density, paint)
         if (values.isEmpty()) return
-        val max = (values.maxOrNull() ?: 0f).coerceAtLeast(1f)
-        val slot = (right-left)/values.size
-        val barWidth = (slot*.58f).coerceAtLeast(1f)
-        values.forEachIndexed { index, value ->
-            val h = (bottom-top) * value / max
-            paint.color = 0xFF91B49C.toInt()
-            val x = left + index*slot + (slot-barWidth)/2
-            canvas.drawRoundRect(RectF(x, bottom-h, x+barWidth, bottom), 3f*density, 3f*density, paint)
+        val max = (values.flatMap { listOf(it.first, it.second) }.maxOrNull() ?: 0f).coerceAtLeast(1f)
+        val slot = (right-left) / values.size
+        val groupWidth = (slot * .72f).coerceAtLeast(2f)
+        val barWidth = (groupWidth / 2f - 1f*density).coerceAtLeast(1f)
+        values.forEachIndexed { index, pair ->
+            val x = left + index * slot + (slot-groupWidth)/2f
+            val incomeHeight = (bottom-top) * pair.first / max
+            val expenseHeight = (bottom-top) * pair.second / max
+            paint.color = 0xFF43866A.toInt()
+            canvas.drawRoundRect(RectF(x, bottom-incomeHeight, x+barWidth, bottom), 2f*density, 2f*density, paint)
+            paint.color = 0xFFD36C61.toInt()
+            val ex = x + barWidth + 1f*density
+            canvas.drawRoundRect(RectF(ex, bottom-expenseHeight, ex+barWidth, bottom), 2f*density, 2f*density, paint)
         }
-        paint.color = 0xFF8B9188.toInt(); paint.textSize = 10f*density
+        paint.color = 0xFF8B8277.toInt()
+        paint.textSize = 10f*density
         canvas.drawText("1", left, height-5f*density, paint)
         canvas.drawText(values.size.toString(), right-8f*density, height-5f*density, paint)
     }
