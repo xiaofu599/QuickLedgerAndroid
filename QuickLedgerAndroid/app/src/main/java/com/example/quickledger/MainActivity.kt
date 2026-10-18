@@ -193,7 +193,7 @@ class MainActivity : Activity() {
 
         content.addView(sectionTitle("账单明细"))
         searchInput = EditText(this).apply {
-            hint = "搜索备注或分类"; singleLine = true
+            hint = "搜索备注或分类"; isSingleLine = true
             setPadding(dp(12), dp(8), dp(12), dp(8))
             setBackgroundColor(white)
             addTextChangedListener(object : android.text.TextWatcher {
@@ -411,11 +411,11 @@ class MainActivity : Activity() {
             .mapValues { (_, list) -> list.sumOf { it.amount } }
             .toList().sortedByDescending { it.second }
         val total = grouped.sumOf { it.second }
-        val message = if (grouped.isEmpty()) "本月暂无$type记录" else grouped.joinToString("\n") { (cat, amount) ->
+        val message = if (grouped.isEmpty()) "本月暂无${type}记录" else grouped.joinToString("\n") { (cat, amount) ->
             val pct = if (total == 0L) 0 else (amount * 100 / total).toInt()
             "${categoryIcon(cat)} $cat    ${money(amount)}（$pct%）"
         }
-        AlertDialog.Builder(this).setTitle("本月$type分类排行").setMessage(message).setPositiveButton("知道了", null).show()
+        AlertDialog.Builder(this).setTitle("本月${type}分类排行").setMessage(message).setPositiveButton("知道了", null).show()
     }
 
     private fun showAnnualReport() {
