@@ -8,6 +8,10 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.net.Uri
+import kotlin.math.ceil
+import kotlin.math.floor
+import kotlin.math.log10
+import kotlin.math.pow
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
@@ -171,10 +175,14 @@ class MainActivity : Activity() {
         summaryBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         content.addView(summaryBox)
         content.addView(space(12))
-        content.addView(sectionTitle("本月支出趋势"))
+        content.addView(sectionTitle("本月收支趋势"))
         chart = SpendChart(this)
         val chartCard = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(10), dp(8), dp(4)); background = rounded(white, 22) }
-        chartCard.addView(chart, LinearLayout.LayoutParams(-1, dp(150)))
+        chartCard.addView(text("收入（绿） · 支出（橙）  单位：元", 12, muted))
+        chartCard.addView(text("左右滑动查看每天金额", 12, muted))
+        val chartScroll = HorizontalScrollView(this).apply { isFillViewport = true }
+        chartScroll.addView(chart, ViewGroup.LayoutParams(dp(70 * Calendar.getInstance().get(Calendar.DAY_OF_MONTH) + 72), dp(230)))
+        chartCard.addView(chartScroll, LinearLayout.LayoutParams(-1, dp(242)))
         content.addView(chartCard)
         content.addView(space(12))
 
@@ -300,10 +308,14 @@ class MainActivity : Activity() {
             detailRow.addView(card, lp)
         }
         summaryBox.addView(detailRow)
-        chart.setValues((1..Calendar.getInstance().get(Calendar.DAY_OF_MONTH)).map { day ->
+        val days = 1..Calendar.getInstance().get(Calendar.DAY_OF_MONTH)
+        val daily = days.map { day ->
             val date = monthNow() + "-" + String.format(Locale.US, "%02d", day)
-            entries.filter { it.type == "支出" && it.date == date }.sumOf { it.amount }.toFloat() / 100f
-        })
+            val records = thisMonth.filter { it.date == date }
+            Pair(records.filter { it.type == "收入" }.sumOf { it.amount } / 100.0,
+                records.filter { it.type == "支出" }.sumOf { it.amount } / 100.0)
+        }
+        chart.setValues(daily)
         val spent = exp
         val info = root.findViewWithTag<TextView>("budgetInfo")
         if (info != null) {
@@ -508,8 +520,26 @@ class MainActivity : Activity() {
             existing?.let { setText(String.format(Locale.US, "%.2f", it.amount / 100.0)) }
         }
         val category = Spinner(this)
-        fun updateCats() { category.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, cats[type]!!) }
-        typeSpinner.onItemSelectedListener = simpleListener { pos -> type = if (pos == 0) "支出" else "收入"; updateCats() }
+        // Spinner delivers an initial selection callback after layout. Do not rebuild
+        // the category adapter unless the type really changed.
+        val rememberedCategories = mutableMapOf<String, String>()
+        existing?.let { rememberedCategories[it.type] = it.category }
+        fun updateCats(preferred: String? = rememberedCategories[type]) {
+            val options = cats[type].orEmpty().toMutableList()
+            // Preserve categories restored from backups, including custom/legacy names.
+            if (!preferred.isNullOrBlank() && preferred !in options) options.add(preferred)
+            category.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
+            category.setSelection(options.indexOf(preferred).takeIf { it >= 0 } ?: 0)
+        }
+        updateCats()
+        typeSpinner.onItemSelectedListener = simpleListener { pos ->
+            val selectedType = if (pos == 0) "支出" else "收入"
+            if (selectedType != type) {
+                category.selectedItem?.toString()?.let { rememberedCategories[type] = it }
+                type = selectedType
+                updateCats()
+            }
+        }
         val date = EditText(this).apply { setText(existing?.date ?: today()); hint = "日期 YYYY-MM-DD"; isSingleLine = true }
         val note = EditText(this).apply {
             hint = "备注（选填）"; isSingleLine = true
@@ -518,12 +548,6 @@ class MainActivity : Activity() {
         }
         layout.addView(labelled("类型", typeSpinner)); layout.addView(labelled("金额", amount))
         layout.addView(labelled("分类", category)); layout.addView(labelled("日期", date)); layout.addView(labelled("备注", note))
-        updateCats()
-        existing?.let { old ->
-            val options = cats[type].orEmpty()
-            val selected = options.indexOf(old.category)
-            if (selected >= 0) category.setSelection(selected)
-        }
         AlertDialog.Builder(this).setTitle(if (existing == null) "记一笔" else "编辑账单").setView(layout).setNegativeButton("取消", null)
             .setPositiveButton("保存", null).create().also { dialog ->
                 dialog.setOnShowListener {
@@ -634,30 +658,80 @@ class MainActivity : Activity() {
 
 class SpendChart(context: android.content.Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private var values: List<Float> = emptyList()
+    private var values: List<Pair<Double, Double>> = emptyList()
     private val density = resources.displayMetrics.density
-    fun setValues(v: List<Float>) { values = v; invalidate() }
+    private fun d(value: Float) = value * density
+
+    fun setValues(v: List<Pair<Double, Double>>) {
+        values = v
+        layoutParams?.let { params ->
+            paint.textSize = d(10f)
+            val longest = v.flatMap { listOf(it.first, it.second) }.maxOfOrNull {
+                paint.measureText(String.format(Locale.CHINA, "%.2f", it))
+            } ?: 0f
+            val slotWidth = maxOf(d(70f), longest * 2 + d(12f))
+            params.width = (slotWidth * v.size.coerceAtLeast(1) + d(100f)).toInt()
+            layoutParams = params
+        }
+        contentDescription = "每日收支，单位元。" + v.mapIndexed { i, pair ->
+            "${i + 1}日收入${pair.first}，支出${pair.second}"
+        }.joinToString("；")
+        invalidate()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val left = 12f*density; val right = width - 8f*density
-        val top = 12f*density; val bottom = height - 24f*density
-        paint.color = 0xFFE8EAE2.toInt(); paint.strokeWidth = density
-        for (i in 0..3) {
-            val y = top + (bottom-top)*i/3f
+        val maximum = values.maxOfOrNull { maxOf(it.first, it.second) } ?: 0.0
+        // Rounded linear ticks adapt to small amounts, instead of an unlabeled scale.
+        val rawStep = maximum.coerceAtLeast(1.0) / 4.0
+        val magnitude = 10.0.pow(floor(log10(rawStep)))
+        val fraction = rawStep / magnitude
+        val step = (listOf(1.0, 2.0, 2.5, 5.0, 10.0).first { it >= fraction }) * magnitude
+        val tickCount = ceil(maximum.coerceAtLeast(1.0) / step).toInt().coerceAtLeast(1)
+        val ceiling = step * tickCount
+        paint.textSize = d(11f)
+        fun tickText(value: Double): String = when {
+            value >= 1000000 -> String.format(Locale.CHINA, "%.1f百万", value / 1000000)
+            value >= 10000 -> String.format(Locale.CHINA, "%.1f万", value / 10000)
+            step < 1.0 -> String.format(Locale.CHINA, "%.2f", value)
+            step % 1.0 != 0.0 -> String.format(Locale.CHINA, "%.1f", value)
+            else -> String.format(Locale.CHINA, "%.0f", value)
+        }
+        val left = maxOf(d(48f), paint.measureText(tickText(ceiling)) + d(10f))
+        val right = width - d(12f)
+        val top = d(30f)
+        val bottom = height - d(28f)
+        paint.strokeWidth = d(1f)
+        for (i in 0..tickCount) {
+            val y = bottom - (bottom - top) * i / tickCount
+            paint.color = 0xFFE8EAE2.toInt()
             canvas.drawLine(left, y, right, y, paint)
+            paint.color = 0xFF8B9188.toInt()
+            paint.textAlign = Paint.Align.RIGHT
+            canvas.drawText(tickText(step * i), left - d(6f), y + d(4f), paint)
         }
         if (values.isEmpty()) return
-        val max = (values.maxOrNull() ?: 0f).coerceAtLeast(1f)
-        val slot = (right-left)/values.size
-        val barWidth = (slot*.58f).coerceAtLeast(1f)
-        values.forEachIndexed { index, value ->
-            val h = (bottom-top) * value / max
-            paint.color = 0xFF91B49C.toInt()
-            val x = left + index*slot + (slot-barWidth)/2
-            canvas.drawRoundRect(RectF(x, bottom-h, x+barWidth, bottom), 3f*density, 3f*density, paint)
+        val slot = (right - left) / values.size
+        val barWidth = minOf(d(16f), slot * .22f)
+        values.forEachIndexed { index, pair ->
+            val center = left + slot * (index + .5f)
+            listOf(pair.first, pair.second).forEachIndexed { series, value ->
+                val x = center + if (series == 0) -d(12f) else d(12f)
+                val h = ((bottom - top) * value / ceiling).toFloat()
+                paint.color = if (series == 0) 0xFF427C61.toInt() else 0xFFC77A65.toInt()
+                canvas.drawRoundRect(RectF(x - barWidth / 2, bottom - h, x + barWidth / 2, bottom), d(3f), d(3f), paint)
+                paint.textSize = d(10f)
+                paint.textAlign = if (series == 0) Paint.Align.RIGHT else Paint.Align.LEFT
+                val label = String.format(Locale.CHINA, "%.2f", value)
+                // Put labels on separate rows so adjacent income/expense figures stay legible.
+                val labelY = bottom - h - d(if (series == 0) 18f else 5f)
+                canvas.drawText(label, center + if (series == 0) -d(2f) else d(2f), labelY, paint)
+            }
+            paint.color = 0xFF8B9188.toInt()
+            paint.textAlign = Paint.Align.CENTER
+            paint.textSize = d(11f)
+            canvas.drawText("${index + 1}日", center, height - d(8f), paint)
         }
-        paint.color = 0xFF8B9188.toInt(); paint.textSize = 10f*density
-        canvas.drawText("1", left, height-5f*density, paint)
-        canvas.drawText(values.size.toString(), right-8f*density, height-5f*density, paint)
+        paint.textAlign = Paint.Align.LEFT
     }
 }
