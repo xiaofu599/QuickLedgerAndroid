@@ -623,14 +623,62 @@ class MainActivity : Activity() {
             }
         }
         val date = EditText(this).apply { setText(existing?.date ?: today()); hint = "日期 YYYY-MM-DD"; isSingleLine = true }
-        val note = EditText(this).apply {
-            hint = "备注（选填）"; isSingleLine = true
+        // Reuse notes from saved bills, including bills created before this update.
+        // Existing encrypted bill storage also preserves these choices after restart.
+        val savedNotes = entries.sortedByDescending { it.id }.map { it.note.trim() }
+            .filter { it.isNotEmpty() }.distinct()
+        val note = AutoCompleteTextView(this).apply {
+            hint = "备注（选填，可选择历史备注）"; isSingleLine = true
+            threshold = 1
             filters = arrayOf(android.text.InputFilter.LengthFilter(100))
-            setText(existing?.note.orEmpty())
+            setAdapter(ArrayAdapter(this@MainActivity, android.R.layout.simple_dropdown_item_1line, savedNotes))
+            setText(existing?.note.orEmpty(), false)
         }
         layout.addView(labelled("类型", typeSpinner)); layout.addView(labelled("金额", amount))
         layout.addView(labelled("分类", category)); layout.addView(labelled("日期", date)); layout.addView(labelled("备注", note))
-        AlertDialog.Builder(this).setTitle(if (existing == null) "记一笔" else "编辑账单").setView(layout).setNegativeButton("取消", null)
+        if (savedNotes.isNotEmpty()) {
+            layout.addView(text("最近备注 · 点一下即可填入，左右滑动查看更多", 12, muted))
+            val quickNotes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            savedNotes.take(8).forEach { saved ->
+                quickNotes.addView(button(saved, 0xFFE9F0E7.toInt(), purple) {
+                    note.setText(saved, false)
+                    note.setSelection(note.text.length)
+                    note.dismissDropDown()
+                })
+                quickNotes.addView(spaceH(6))
+            }
+            layout.addView(HorizontalScrollView(this).apply { addView(quickNotes) })
+            layout.addView(button("全部历史备注（${savedNotes.size}）", 0xFFE9F0E7.toInt(), purple) {
+                val chooserBody = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(16), dp(8), dp(16), dp(8))
+                }
+                val search = EditText(this).apply { hint = "搜索历史备注"; isSingleLine = true }
+                val choices = ListView(this)
+                val noteAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, savedNotes)
+                choices.adapter = noteAdapter
+                chooserBody.addView(search)
+                chooserBody.addView(choices, LinearLayout.LayoutParams(-1, 0, 1f))
+                val chooser = AlertDialog.Builder(this).setTitle("选择历史备注")
+                    .setView(chooserBody).setNegativeButton("取消", null).create()
+                search.addTextChangedListener(object : android.text.TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { noteAdapter.filter.filter(s) }
+                    override fun afterTextChanged(s: android.text.Editable?) {}
+                })
+                choices.setOnItemClickListener { _, _, position, _ ->
+                    note.setText(noteAdapter.getItem(position).orEmpty(), false)
+                    note.setSelection(note.text.length)
+                    note.dismissDropDown()
+                    chooser.dismiss()
+                }
+                chooser.show()
+                chooser.window?.setLayout(-1, (resources.displayMetrics.heightPixels * .65f).toInt())
+            })
+        } else {
+            layout.addView(text("保存账单后，备注会自动出现在这里，供下次快捷选用。", 12, muted))
+        }
+        AlertDialog.Builder(this).setTitle(if (existing == null) "记一笔" else "编辑账单").setView(ScrollView(this).apply { addView(layout) }).setNegativeButton("取消", null)
             .setPositiveButton("保存", null).create().also { dialog ->
                 dialog.setOnShowListener {
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
