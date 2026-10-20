@@ -186,6 +186,8 @@ class MainActivity : Activity() {
         content.addView(chartCard)
         content.addView(space(12))
 
+        content.addView(button("收支饼图 · 按月 / 按日  ›", 0xFFE9F0E7.toInt(), purple) { showStatistics() })
+        content.addView(space(12))
         val budgetRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         budgetRow.addView(text("月度预算", 17, ink, true), LinearLayout.LayoutParams(0, -2, 1f))
         budgetRow.addView(button("设置预算", 0xFFE9F0E7.toInt(), purple) { showBudgetDialog() })
@@ -508,6 +510,86 @@ class MainActivity : Activity() {
         dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * .83f).toInt())
     }
 
+    private fun showStatistics() {
+        var daily = false
+        var selectedDate = today()
+        var selectedType = "支出"
+        var smart = true
+        var parentCategory: String? = null
+        val wrapper = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(8))
+            setBackgroundColor(bg)
+        }
+        val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val period = Spinner(this).apply { adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("按月", "按日")) }
+        val type = Spinner(this).apply { adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("支出", "收入")) }
+        controls.addView(period, LinearLayout.LayoutParams(0, dp(48), 1f))
+        controls.addView(type, LinearLayout.LayoutParams(0, dp(48), 1f))
+        wrapper.addView(controls)
+        val dateButton = button("", 0xFFE9F0E7.toInt(), purple) { }
+        wrapper.addView(dateButton)
+        val mode = Spinner(this).apply { adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("备注智能分类", "账单原类别")) }
+        wrapper.addView(mode)
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        wrapper.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        val dialog = AlertDialog.Builder(this).setTitle("收支分类统计").setView(wrapper).setNegativeButton("关闭", null).create()
+        fun draw() {
+            body.removeAllViews()
+            dateButton.text = (if (daily) selectedDate else month(selectedDate)) + "  · 点击选择日期"
+            val records = entries.filter { it.type == selectedType && (if (daily) it.date == selectedDate else month(it.date) == month(selectedDate)) }
+            fun classification(e: Entry): Pair<String, String> = if (smart) NoteClassifier.classify(e.type, e.category, e.note) else Pair(e.category, if (e.note.isBlank()) "无备注" else e.note)
+            val selected = records.filter { parentCategory == null || classification(it).first == parentCategory }
+            val total = selected.sumOf { it.amount }
+            body.addView(text("${parentCategory ?: "全部分类"} · $selectedType ${money(total)}", 18, ink, true))
+            body.addView(text(if (parentCategory == null) "点击分类查看细分" else "占比以当前大类总金额为基准", 12, muted))
+            if (parentCategory != null) body.addView(button("‹ 返回全部分类", 0xFFE9F0E7.toInt(), purple) { parentCategory = null; draw() })
+            val groups = selected.groupBy { if (parentCategory == null) classification(it).first else classification(it).second }
+                .entries.sortedByDescending { it.value.sumOf { e -> e.amount } }
+            if (total == 0L) {
+                body.addView(text("这个时间段暂无${selectedType}账单", 16, muted).apply { setPadding(0, dp(32), 0, dp(32)) })
+                return
+            }
+            val slices = groups.map { it.value.sumOf { e -> e.amount } }
+            val pie = LedgerPie(this)
+            pie.amounts = slices
+            pie.contentDescription = groups.joinToString("；") { "${it.key} ${money(it.value.sumOf { e -> e.amount })}" }
+            body.addView(pie, LinearLayout.LayoutParams(-1, dp(230)))
+            groups.forEachIndexed { index, group ->
+                val amount = slices[index]
+                val percentage = amount.toDouble() / total * 100
+                val percentText = if (percentage < 0.01) "<0.01" else String.format(Locale.CHINA, "%.2f", percentage)
+                val row = text("● ${group.key}\n${money(amount)}  ·  $percentText%  ·  ${group.value.size}笔  ›", 15, LedgerPie.colors[index % LedgerPie.colors.size]).apply {
+                    setPadding(dp(10), dp(12), dp(10), dp(12)); background = rounded(white, 12)
+                }
+                row.setOnClickListener {
+                    if (parentCategory == null) { parentCategory = group.key; draw() }
+                    else {
+                        val detail = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(8)) }
+                        group.value.sortedByDescending { it.date }.forEach { e ->
+                            detail.addView(text("${e.date}  ${money(e.amount)}\n${e.category} · ${e.note.ifBlank { "无备注" }}", 15, ink).apply { setPadding(0, dp(12), 0, dp(12)) })
+                        }
+                        AlertDialog.Builder(this).setTitle(group.key).setView(ScrollView(this).apply { addView(detail) }).setPositiveButton("返回", null).show()
+                    }
+                }
+                body.addView(row); body.addView(space(6))
+            }
+            body.addView(text("金额按分汇总；百分比四舍五入。备注分类仅用于统计，不修改原账单。未匹配备注保留原类别。外卖关键词优先于早/午/晚餐，同一笔只计入一个子类。", 12, muted))
+        }
+        dateButton.setOnClickListener {
+            val parts = selectedDate.split('-').map { it.toInt() }
+            android.app.DatePickerDialog(this, { _, y, m, d ->
+                selectedDate = String.format(Locale.US, "%04d-%02d-%02d", y, m + 1, d)
+                parentCategory = null; draw()
+            }, parts[0], parts[1] - 1, parts[2]).show()
+        }
+        period.onItemSelectedListener = simpleListener { daily = it == 1; parentCategory = null; draw() }
+        type.onItemSelectedListener = simpleListener { selectedType = if (it == 0) "支出" else "收入"; parentCategory = null; draw() }
+        mode.onItemSelectedListener = simpleListener { smart = it == 0; parentCategory = null; draw() }
+        draw(); dialog.show()
+        dialog.window?.setLayout(-1, (resources.displayMetrics.heightPixels * .9f).toInt())
+    }
+
     private fun showEntryDialog(existing: Entry? = null) {
         var type = existing?.type ?: "支出"
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(12), dp(20), dp(4)) }
@@ -679,6 +761,12 @@ class SpendChart(context: android.content.Context) : View(context) {
         invalidate()
     }
 
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        // View's default measurement may collapse inside a scrolling parent.
+        val desired = layoutParams?.width?.takeIf { it > 0 } ?: (d(80f) * values.size + d(100f)).toInt()
+        setMeasuredDimension(desired, resolveSize(d(230f).toInt(), heightMeasureSpec))
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val maximum = values.maxOfOrNull { maxOf(it.first, it.second) } ?: 0.0
@@ -725,7 +813,7 @@ class SpendChart(context: android.content.Context) : View(context) {
                 val label = String.format(Locale.CHINA, "%.2f", value)
                 // Put labels on separate rows so adjacent income/expense figures stay legible.
                 val labelY = bottom - h - d(if (series == 0) 18f else 5f)
-                canvas.drawText(label, center + if (series == 0) -d(2f) else d(2f), labelY, paint)
+                if (value > 0) canvas.drawText(label, center + if (series == 0) -d(2f) else d(2f), labelY, paint)
             }
             paint.color = 0xFF8B9188.toInt()
             paint.textAlign = Paint.Align.CENTER
@@ -733,5 +821,68 @@ class SpendChart(context: android.content.Context) : View(context) {
             canvas.drawText("${index + 1}日", center, height - d(8f), paint)
         }
         paint.textAlign = Paint.Align.LEFT
+    }
+}
+
+/** First matching rule wins, so amounts are never double counted. */
+object NoteClassifier {
+    private data class Rule(val type: String, val category: String, val sub: String, val words: List<String>)
+    private fun rule(type: String, category: String, sub: String, words: String) = Rule(type, category, sub, words.split('|'))
+    private val rules = listOf(
+        rule("支出", "餐饮", "外卖", "外卖|美团外卖|饿了么"),
+        rule("支出", "餐饮", "早餐", "早餐|早饭|早点"),
+        rule("支出", "餐饮", "午饭", "午饭|午餐|中饭"),
+        rule("支出", "餐饮", "晚饭", "晚饭|晚餐"),
+        rule("支出", "餐饮", "夜宵", "夜宵|宵夜"),
+        rule("支出", "餐饮", "饮品", "奶茶|咖啡|饮料|果茶"),
+        rule("支出", "餐饮", "水果零食", "水果|零食|饼干|蛋糕"),
+        rule("支出", "餐饮", "食材买菜", "买菜|食材|蔬菜"),
+        rule("支出", "餐饮", "聚餐", "聚餐|火锅|烧烤|请客吃饭"),
+        rule("支出", "交通", "打车", "打车|出租车|滴滴|网约车"),
+        rule("支出", "交通", "公交地铁", "公交|地铁"),
+        rule("支出", "交通", "长途出行", "机票|火车票|高铁|动车"),
+        rule("支出", "交通", "用车", "加油|停车|过路费|充电费"),
+        rule("支出", "住房", "房租", "房租|租金"),
+        rule("支出", "住房", "水电物业", "水费|电费|燃气|物业"),
+        rule("支出", "购物", "服饰", "衣服|裤子|鞋子|服装"),
+        rule("支出", "购物", "数码", "手机|电脑|耳机|键盘"),
+        rule("支出", "日用", "生活用品", "纸巾|洗衣液|牙膏|洗发水"),
+        rule("支出", "娱乐", "电影游戏", "电影|游戏|电玩"),
+        rule("支出", "医疗", "就医买药", "挂号|买药|药费|诊疗|体检"),
+        rule("支出", "学习", "书籍课程", "买书|书费|课程|学费|培训"),
+        rule("收入", "工资", "基本工资", "工资|薪水|薪资|底薪"),
+        rule("收入", "奖金", "年终奖", "年终奖"),
+        rule("收入", "奖金", "绩效奖金", "奖金|绩效|提成"),
+        rule("收入", "兼职", "兼职劳务", "兼职|劳务|稿费|家教|接单"),
+        rule("收入", "理财", "利息分红", "利息|分红|股息|理财"),
+        rule("收入", "红包", "红包礼金", "红包|礼金|压岁钱")
+    )
+    fun classify(type: String, category: String, note: String): Pair<String, String> {
+        val match = rules.firstOrNull { it.type == type && it.words.any { word -> note.contains(word, ignoreCase = true) } }
+        return if (match != null) match.category to match.sub
+        else category.ifBlank { "其他" } to if (note.isBlank()) "无备注" else "其他备注"
+    }
+}
+
+class LedgerPie(context: android.content.Context) : View(context) {
+    companion object {
+        val colors = intArrayOf(0xFF507D65.toInt(), 0xFFC77A65.toInt(), 0xFF668CAB.toInt(), 0xFFAD8A44.toInt(), 0xFF9275A8.toInt(), 0xFF3E9692.toInt(), 0xFFAF6687.toInt(), 0xFF7D8548.toInt(), 0xFF956C52.toInt())
+    }
+    var amounts: List<Long> = emptyList()
+        set(value) { field = value; invalidate() }
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val total = amounts.sum()
+        if (total <= 0L) return
+        val diameter = minOf(width, height) * .88f
+        val bounds = RectF((width - diameter) / 2, (height - diameter) / 2, (width + diameter) / 2, (height + diameter) / 2)
+        var start = -90f
+        amounts.forEachIndexed { i, amount ->
+            val sweep = if (i == amounts.lastIndex) 270f - start else (amount.toDouble() / total * 360).toFloat()
+            paint.color = colors[i % colors.size]
+            canvas.drawArc(bounds, start, sweep, true, paint)
+            start += sweep
+        }
     }
 }
